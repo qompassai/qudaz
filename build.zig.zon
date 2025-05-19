@@ -18,6 +18,10 @@
         "src",
         "test",
         "LICENSE",
+        "LICENSE-QCDA",
+        "LICENSE-AGPL",
+        "CITATION.cff",
+        "citation.bib",
         "README.md",
     },
 }
