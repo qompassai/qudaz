@@ -10,6 +10,8 @@ This library helps to interact with NVIDIA GPUs from zig. Provides high level in
 
 
 ![Repository Views](https://komarev.com/ghpvc/?username=qompassai-qudaz)
+![GitHub all releases](https://img.shields.io/github/downloads/qompassai/qudaz/total?style=flat-square)
+
   <a href="https://ziglang.org/">
   <img src="https://img.shields.io/badge/Zig-F7A41D?style=for-the-badge&logo=zig&logoColor=white" alt="Zig">
 </a>
