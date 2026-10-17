@@ -3,15 +3,16 @@
 const std = @import("std");
 const utils = @import("test/utils.zig");
 
-fn getCudaPath(path: ?[]const u8, allocator: std.mem.Allocator) ![]const u8 {
+fn getCudaPath(b: *std.Build, path: ?[]const u8, allocator: std.mem.Allocator) ![]const u8 {
+    const io = b.graph.io;
 
     return incldue_path: {
         if (path) |parent| {
             const cuda_file = try std.fmt.allocPrint(allocator, "{s}/include/cuda.h", .{parent});
             defer allocator.free(cuda_file);
-            _ = std.fs.openFileAbsolute(cuda_file, .{}) catch |e| {
+            _ = std.Io.Dir.openFileAbsolute(io, cuda_file, .{}) catch |e| {
                 switch (e) {
-                    std.fs.File.OpenError.FileNotFound => return error.CUDA_INSTALLATION_NOT_FOUND,
+                    error.FileNotFound => return error.CUDA_INSTALLATION_NOT_FOUND,
                     else => return e,
                 }
             };
@@ -26,7 +27,7 @@ fn getCudaPath(path: ?[]const u8, allocator: std.mem.Allocator) ![]const u8 {
             };
             inline for (probable_roots) |parent| h: {
                 const cuda_file = parent ++ "/include/cuda.h";
-                _ = std.fs.openFileAbsolute(cuda_file, .{}) catch {
+                _ = std.Io.Dir.openFileAbsolute(io, cuda_file, .{}) catch {
                     break :h;
                 };
                 break :incldue_path parent;
@@ -56,7 +57,7 @@ pub fn build(b: *std.Build) !void {
 
     /////////////////////////////////////////////////////////////
     //// Get Cuda paths
-    const cuda_folder = try getCudaPath(cuda_path, b.allocator);
+    const cuda_folder = try getCudaPath(b, cuda_path, b.allocator);
     const cuda_include_dir = try std.fmt.allocPrint(b.allocator, "{s}/include", .{cuda_folder});
 
     ////////////////////////////////////////////////////////////
@@ -79,7 +80,7 @@ pub fn build(b: *std.Build) !void {
 
     inline for (lib_paths) |lib_path| h: {
         const path = try std.fmt.allocPrint(b.allocator, "{s}/{s}", .{ cuda_folder, lib_path });
-        _ = std.fs.openDirAbsolute(path, .{}) catch {
+        _ = std.Io.Dir.openDirAbsolute(b.graph.io, path, .{}) catch {
             break :h;
         };
         cudaz_module.addLibraryPath(.{ .cwd_relative = path });
@@ -90,12 +91,9 @@ pub fn build(b: *std.Build) !void {
     // Creates a test binary.
     // Test step is created to be run from commandline i.e, zig build test
     test_blk: {
-        const test_file = std.fs.cwd().openFile("build.zig.zon", .{}) catch {
+        const test_file_contents = std.Io.Dir.cwd().readFileAlloc(b.graph.io, "build.zig.zon", b.allocator, .unlimited) catch {
             break :test_blk;
         };
-        defer test_file.close();
-
-        const test_file_contents = try test_file.readToEndAlloc(b.allocator, std.math.maxInt(usize));
         defer b.allocator.free(test_file_contents);
 
         // Hack for identifying if the current root is qudaz project, if not don't register tests.
@@ -104,21 +102,21 @@ pub fn build(b: *std.Build) !void {
         }
 
         const test_step = b.step("test", "Run library tests");
-        const test_dir = try std.fs.cwd().openDir("test", .{ .iterate = true });
+        const test_dir = try std.Io.Dir.cwd().openDir(b.graph.io, "test", .{ .iterate = true });
         var dir_iterator = try test_dir.walk(b.allocator);
-        while (try dir_iterator.next()) |item| {
+        while (try dir_iterator.next(b.graph.io)) |item| {
             if (item.kind == .file) {
                 const test_path = try std.fmt.allocPrint(b.allocator, "{s}/{s}", .{ "test", item.path });
-                const sub_test = b.addTest(.{ .name = item.path, .root_source_file = b.path(test_path), .target = target, .optimize = optimize });
+                const sub_test = b.addTest(.{ .name = item.path, .root_module = b.createModule(.{ .root_source_file = b.path(test_path), .target = target, .optimize = optimize }) });
                 // Add Module
-                sub_test.root_module.addImport("cudaz", cudaz_module);
+                sub_test.root_module.addImport("qudaz", cudaz_module);
 
                 // Link libc, cuda and nvrtc libraries
-                sub_test.linkLibC();
-                sub_test.linkSystemLibrary("cuda");
-                sub_test.linkSystemLibrary("nvrtc");
-                sub_test.linkSystemLibrary("curand");
-                sub_test.linkSystemLibrary("cudart");
+                sub_test.root_module.link_libc = true;
+                sub_test.root_module.linkSystemLibrary("cuda", .{});
+                sub_test.root_module.linkSystemLibrary("nvrtc", .{});
+                sub_test.root_module.linkSystemLibrary("curand", .{});
+                sub_test.root_module.linkSystemLibrary("cudart", .{});
 
                 // Creates a run step for test binary
                 const run_sub_tests = b.addRunArtifact(sub_test);
@@ -136,7 +134,7 @@ pub fn build(b: *std.Build) !void {
     //// Clean the cache folders and artifacts
 
     // Creates a binary that cleans up zig artifact folders
-    const clean = b.addExecutable(.{ .name = "clean", .root_source_file = b.path("bin/delete-zig-cache.zig"), .target = target, .optimize = optimize });
+    const clean = b.addExecutable(.{ .name = "clean", .root_module = b.createModule(.{ .root_source_file = b.path("bin/delete-zig-cache.zig"), .target = target, .optimize = optimize }) });
 
     // Creates a run step
     const clean_step = b.addRunArtifact(clean);
